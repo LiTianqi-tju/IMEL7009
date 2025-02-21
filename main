@@ -1,0 +1,198 @@
+import numpy as np
+import matplotlib
+matplotlib.use('TkAgg')  # Use Tkinter as the backend
+import matplotlib.pyplot as plt
+
+
+# Helper Functions
+def relu(x):
+    """ReLU activation function."""
+    return np.maximum(0, x)
+
+
+def relu_derivative(x):
+    """Derivative of ReLU."""
+    return (x > 0).astype(float)
+
+
+def softmax(x):
+    """Softmax activation function for output layer."""
+    exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))  # Stability trick
+    return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+
+
+def cross_entropy_loss(predictions, targets):
+    """Cross-entropy loss function."""
+    n_samples = targets.shape[0]
+    logp = -np.log(predictions[range(n_samples), targets.argmax(axis=1)])
+    return np.sum(logp) / n_samples
+
+
+def accuracy(predictions, targets):
+    """Calculate accuracy."""
+    pred_labels = np.argmax(predictions, axis=1)
+    true_labels = np.argmax(targets, axis=1)
+    return np.mean(pred_labels == true_labels)
+
+
+# Fully Connected Neural Network Class
+class FullyConnectedNN:
+    def __init__(self, layers):
+        """Initialize the network with given layer sizes."""
+        self.layers = layers
+        self.weights = []
+        self.biases = []
+
+        # Initialize weights and biases
+        for i in range(len(layers) - 1):
+            # Xavier initialization
+            weight = np.random.randn(layers[i], layers[i + 1]) / np.sqrt(layers[i])
+            bias = np.zeros((1, layers[i + 1]))
+            self.weights.append(weight)
+            self.biases.append(bias)
+
+    def forward(self, X):
+        """Forward pass."""
+        self.activations = [X]  # Store all layer activations
+        self.z_values = []  # Store all layer pre-activations
+
+        for i in range(len(self.weights) - 1):
+            # Compute pre-activation (z) and activation (a) for each layer
+            z = np.dot(self.activations[-1], self.weights[i]) + self.biases[i]
+            a = relu(z)
+            self.z_values.append(z)
+            self.activations.append(a)
+
+        # Output layer (softmax)
+        z = np.dot(self.activations[-1], self.weights[-1]) + self.biases[-1]
+        a = softmax(z)
+        self.z_values.append(z)
+        self.activations.append(a)
+
+        return a
+
+    def backward(self, X, y, learning_rate):
+        """Backward pass."""
+        m = X.shape[0]
+        dz = self.activations[-1] - y  # Initial gradient (output layer)
+
+        for i in reversed(range(len(self.weights))):
+            dw = np.dot(self.activations[i].T, dz) / m
+            db = np.sum(dz, axis=0, keepdims=True) / m
+
+            if i > 0:
+                dz = np.dot(dz, self.weights[i].T) * relu_derivative(self.z_values[i - 1])
+
+            # Update weights and biases
+            self.weights[i] -= learning_rate * dw
+            self.biases[i] -= learning_rate * db
+
+    def train(self, X_train, y_train, X_val, y_val, epochs, batch_size, learning_rate):
+        """Train the network."""
+        n_samples = X_train.shape[0]
+        epoch_losses = []  # To store loss for each epoch
+
+        for epoch in range(epochs):
+            # Shuffle the data
+            indices = np.random.permutation(n_samples)
+            X_train = X_train[indices]
+            y_train = y_train[indices]
+
+            # Mini-batch gradient descent
+            for i in range(0, n_samples, batch_size):
+                X_batch = X_train[i:i + batch_size]
+                y_batch = y_train[i:i + batch_size]
+
+                # Forward and backward pass
+                predictions = self.forward(X_batch)
+                self.backward(X_batch, y_batch, learning_rate)
+
+            # Evaluate on validation set
+            val_predictions = self.forward(X_val)
+            val_loss = cross_entropy_loss(val_predictions, y_val)
+            val_acc = accuracy(val_predictions, y_val)
+            epoch_losses.append(val_loss)  # Append epoch loss for plotting
+            print(f"Epoch {epoch + 1}/{epochs} - Loss: {val_loss:.4f} - Accuracy: {val_acc:.4f}")
+
+        # Plot the loss graph
+        plt.figure(figsize=(8, 6))
+        plt.plot(range(1, epochs + 1), epoch_losses, marker='o', label="Validation Loss")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Loss Curve")
+        plt.grid()
+        plt.legend()
+        plt.show()
+
+    def predict(self, X):
+        """Predict labels for new data."""
+        predictions = self.forward(X)
+        return np.argmax(predictions, axis=1)
+
+
+# Data Loading and Preprocessing
+def load_mnist_from_csv(train_path, test_path):
+    """Load MNIST data from CSV files."""
+    # Load data from CSV
+    train_data = np.loadtxt(train_path, delimiter=",", skiprows=1)
+    test_data = np.loadtxt(test_path, delimiter=",", skiprows=1)
+
+    # Split into features and labels
+    X_train = train_data[:, 1:]
+    y_train = train_data[:, 0].astype(int)
+    X_test = test_data[:, 1:]
+    y_test = test_data[:, 0].astype(int)
+
+    # Normalize pixel values to [0, 1]
+    X_train = X_train / 255.0
+    X_test = X_test / 255.0
+
+    # One-hot encode labels
+    y_train = np.eye(10)[y_train]
+    y_test = np.eye(10)[y_test]
+
+    return X_train, y_train, X_test, y_test
+
+# Function to plot images with predictions
+def plot_predictions(X, y_true, y_pred, num_images=10):
+    """Plot a subset of images with their true and predicted labels."""
+    plt.figure(figsize=(12, 6))
+    for i in range(num_images):
+        plt.subplot(2, 5, i + 1)
+        plt.imshow(X[i].reshape(28, 28), cmap='gray')  # Reshape to 28x28 and plot
+        plt.title(f"True: {np.argmax(y_true[i])}\nPred: {y_pred[i]}", fontsize=10)
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
+# Load MNIST dataset from CSV
+train_path = r"F:\学习资料\UM\Lectures\IMEL7009\Project1\mnist_train.csv"
+test_path = r"F:\学习资料\UM\Lectures\IMEL7009\Project1\mnist_test.csv"
+X_train, y_train, X_test, y_test = load_mnist_from_csv(train_path, test_path)
+
+# Split into training and validation sets
+X_train, y_train = X_train[:60000], y_train[:60000]  # Use all 60k for training
+X_val, y_val = X_test[:10000], y_test[:10000]  # Use part of the test set for validation
+
+# Define the network architecture
+input_size = 784  # 28x28 images
+hidden_layers = [128, 64]  # Two hidden layers with 128 and 64 neurons
+output_size = 10  # 10 classes (digits 0-9)
+layers = [input_size] + hidden_layers + [output_size]
+
+# Create and train the model
+model = FullyConnectedNN(layers)
+model.train(X_train, y_train, X_val, y_val, epochs=10, batch_size=64, learning_rate=0.01)
+
+# Evaluate on test set
+test_predictions = model.forward(X_test)
+test_accuracy = accuracy(test_predictions, y_test)
+print(f"Test Accuracy: {test_accuracy:.4f}")
+
+
+# Predict labels for the test set
+test_predictions = model.predict(X_test)
+
+# Plot some test images with their true and predicted labels
+plot_predictions(X_test, y_test, test_predictions, num_images=10)
